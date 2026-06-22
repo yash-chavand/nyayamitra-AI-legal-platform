@@ -1,4 +1,5 @@
 import json
+import re
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from ...db.database import get_db
@@ -80,6 +81,19 @@ def generate_written_arguments(body: dict, current_user: User = Depends(require_
 def list_documents(current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
     return db.query(LawyerDocument).filter(LawyerDocument.user_id == current_user.id).order_by(LawyerDocument.created_at.desc()).all()
 
+def html_to_plain_text(html_content: str) -> str:
+    if not html_content:
+        return ""
+    # Convert common paragraph/line break tags to newlines
+    text = html_content.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    text = re.sub(r'</div>', '\n', text)
+    text = re.sub(r'</p>', '\n', text)
+    # Strip all other HTML tags
+    text = re.sub(r'<[^>]*>', '', text)
+    # Decode common HTML entities
+    text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    return text
+
 @router.post("/export-pdf")
 def export_pdf(body: dict, current_user: User = Depends(require_lawyer)):
     content = body.get("content")
@@ -87,12 +101,14 @@ def export_pdf(body: dict, current_user: User = Depends(require_lawyer)):
     if not content:
         raise HTTPException(status_code=400, detail="No content to export")
     
+    clean_content = html_to_plain_text(content)
+    
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("helvetica", size=12)
     
     # Handle multi-line content
-    for line in content.split('\n'):
+    for line in clean_content.split('\n'):
         # fpdf2 handles unicode much better - no need to encode/decode manually
         pdf.multi_cell(0, 10, txt=line)
     
@@ -104,3 +120,17 @@ def export_pdf(body: dict, current_user: User = Depends(require_lawyer)):
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.pdf"}
     )
+
+@router.put("/{doc_id}")
+def update_document(doc_id: int, body: dict, current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
+    doc = db.query(LawyerDocument).filter(LawyerDocument.id == doc_id, LawyerDocument.user_id == current_user.id).first()
+    if not doc: 
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    content = body.get("content")
+    if content is None:
+        raise HTTPException(status_code=400, detail="Missing content")
+    
+    doc.content = content
+    db.commit()
+    return {"message": "Updated successfully", "content": doc.content}

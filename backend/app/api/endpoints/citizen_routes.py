@@ -11,13 +11,30 @@ from ...db.models import User, Conversation, Draft
 from ...core.auth import get_current_user
 from ...schemas.schemas import QuestionRequest, DocumentRequest
 from ...services.vector_service import vector_service
+from ...services.bns_service import bns_service
 
 router = APIRouter(tags=["Citizen - RAG & Drafting"])
+
+import re
+
+def html_to_plain_text(html_content: str) -> str:
+    if not html_content:
+        return ""
+    # Convert common paragraph/line break tags to newlines
+    text = html_content.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    text = re.sub(r'</div>', '\n', text)
+    text = re.sub(r'</p>', '\n', text)
+    # Strip all other HTML tags
+    text = re.sub(r'<[^>]*>', '', text)
+    # Decode common HTML entities
+    text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    return text
 
 def text_to_docx(text: str, title: str):
     doc = Document()
     doc.add_heading(title, 0)
-    for line in text.split('\n'):
+    clean_text = html_to_plain_text(text)
+    for line in clean_text.split('\n'):
         doc.add_paragraph(line)
     
     file_stream = io.BytesIO()
@@ -42,8 +59,12 @@ def ask_question(body: QuestionRequest, current_user: User = Depends(get_current
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Empty question")
     
-    # Using simplified logic for now (intent can be handled better or simplified)
-    result = vector_service.get_citizen_answer(body.question, "general", "Provide a helpful legal answer.")
+    result = vector_service.get_citizen_answer(
+        body.question, 
+        "general", 
+        "Provide a helpful legal answer.",
+        language=body.language or "English"
+    )
     
     db.add(Conversation(user_id=current_user.id, question=body.question, answer=result["answer"]))
     db.commit()
@@ -94,3 +115,24 @@ def delete_draft(draft_id: int, current_user: User = Depends(get_current_user), 
     db.delete(draft)
     db.commit()
     return {"message": "Deleted"}
+
+@router.get("/bns-helper")
+def bns_lookup(query: str, current_user: User = Depends(get_current_user)):
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="Empty query")
+    return bns_service.lookup(query)
+
+@router.put("/drafts/{draft_id}")
+def update_draft(draft_id: int, body: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    draft = db.query(Draft).filter(Draft.id == draft_id, Draft.user_id == current_user.id).first()
+    if not draft: 
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    content = body.get("content")
+    if content is None:
+        raise HTTPException(status_code=400, detail="Missing content")
+    
+    draft.content = content
+    draft.updated_at = datetime.now()
+    db.commit()
+    return {"message": "Updated successfully", "content": draft.content}

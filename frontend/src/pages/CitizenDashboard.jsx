@@ -5,9 +5,13 @@ import ChatHistory from "../components/ChatHistory"
 import DocumentGenerator from "../components/DocumentGenerator"
 import SavedDrafts from "../components/SavedDrafts"
 import LegalGuides from "../components/LegalGuides"
+import VoiceAssistant from "../components/VoiceAssistant"
+import BNSHelper from "../components/BNSHelper"
 
 const NAV = [
     { key: "chat", icon: "💬", label: "Chat Assistant" },
+    { key: "voice", icon: "🎙️", label: "Voice Assistant" },
+    { key: "bns", icon: "⚖️", label: "BNS Helper" },
     { key: "history", icon: "🕐", label: "Chat History" },
     { key: "documents", icon: "📄", label: "Document Generator" },
     { key: "drafts", icon: "💾", label: "Saved Drafts" },
@@ -53,6 +57,8 @@ export default function CitizenDashboard() {
                         </div>
                     </div>
                 )
+            case "voice": return <VoiceAssistant />
+            case "bns": return <BNSHelper />
             case "history": return <ChatHistory />
             case "documents": return <DocumentGenerator />
             case "drafts": return <SavedDrafts />

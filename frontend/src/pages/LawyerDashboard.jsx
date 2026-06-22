@@ -5,11 +5,15 @@ import SimilaritySearch from "../components/SimilaritySearch"
 import SearchHistory from "../components/SearchHistory"
 import CasesBrowser from "../components/CasesBrowser"
 import LawyerDocuments from "../components/LawyerDocuments"
+import DocumentSummarizer from "../components/DocumentSummarizer"
+import HearingScheduler from "../components/HearingScheduler"
 
 const NAV = [
     { key: "search", icon: "🔍", label: "Case Similarity" },
     { key: "history", icon: "📋", label: "Search History" },
     { key: "docs", icon: "📂", label: "Litigation Documents" },
+    { key: "summarizer", icon: "📄", label: "PDF Summarizer" },
+    { key: "scheduler", icon: "📅", label: "Hearing Scheduler" },
     { key: "cases", icon: "📁", label: "Case Browser" },
 ]
 
@@ -77,6 +81,8 @@ export default function LawyerDashboard() {
                     {tab === "search" && <SimilaritySearch />}
                     {tab === "history" && <SearchHistory />}
                     {tab === "docs" && <LawyerDocuments />}
+                    {tab === "summarizer" && <DocumentSummarizer />}
+                    {tab === "scheduler" && <HearingScheduler />}
                     {tab === "cases" && <CasesBrowser />}
                 </main>
             </div>

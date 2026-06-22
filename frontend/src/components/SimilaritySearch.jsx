@@ -1,6 +1,20 @@
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { apiPost, BASE_URL } from "../utils/auth"
 import ReactMarkdown from "react-markdown"
+
+const LANGUAGES = [
+    { code: "hi-IN", label: "हिन्दी (Hindi)" },
+    { code: "en-IN", label: "English (India)" },
+    { code: "bn-IN", label: "বাংলা (Bengali)" },
+    { code: "ta-IN", label: "தமிழ் (Tamil)" },
+    { code: "te-IN", label: "తెలుగు (Telugu)" },
+    { code: "mr-IN", label: "मराठी (Marathi)" },
+    { code: "kn-IN", label: "ಕನ್ನಡ (Kannada)" },
+    { code: "gu-IN", label: "ગુજરાતી (Gujarati)" },
+    { code: "ml-IN", label: "മലയാളം (Malayalam)" },
+    { code: "pa-IN", label: "ਪੰਜਾਬੀ (Punjabi)" },
+    { code: "ur-IN", label: "اردو (Urdu)" }
+]
 
 function CaseSpecificChat({ caseName, onClose }) {
     const [messages, setMessages] = useState([])
@@ -110,17 +124,84 @@ export default function SimilaritySearch() {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState("")
     const [activeChat, setActiveChat] = useState(null)
-
     const [showCases, setShowCases] = useState(false)
+
+    const [isListening, setIsListening] = useState(false)
+    const [selectedLanguage, setSelectedLanguage] = useState("hi-IN")
+    const [translatedQuery, setTranslatedQuery] = useState("")
+    const recognitionRef = useRef(null)
+    const startTextRef = useRef("")
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    const isVoiceSupported = !!SpeechRecognition
+
+    useEffect(() => {
+        if (!isVoiceSupported) return
+
+        const rec = new SpeechRecognition()
+        rec.continuous = true
+        rec.interimResults = true
+        rec.lang = selectedLanguage
+
+        rec.onstart = () => {
+            setIsListening(true)
+        }
+
+        rec.onresult = (e) => {
+            const currentTranscript = Array.from(e.results)
+                .map(result => result[0].transcript)
+                .join("")
+            setQuery(startTextRef.current + (startTextRef.current ? " " : "") + currentTranscript)
+        }
+
+        rec.onerror = (e) => {
+            console.error("Speech recognition error:", e.error)
+            setIsListening(false)
+        }
+
+        rec.onend = () => {
+            setIsListening(false)
+        }
+
+        recognitionRef.current = rec
+
+        return () => {
+            rec.stop()
+        }
+    }, [selectedLanguage, isVoiceSupported])
+
+    const getLanguageName = (code) => {
+        const names = {
+            "hi-IN": "Hindi",
+            "en-IN": "English",
+            "bn-IN": "Bengali",
+            "ta-IN": "Tamil",
+            "te-IN": "Telugu",
+            "mr-IN": "Marathi",
+            "kn-IN": "Kannada",
+            "gu-IN": "Gujarati",
+            "ml-IN": "Malayalam",
+            "pa-IN": "Punjabi",
+            "ur-IN": "Urdu"
+        }
+        return names[code] || "English"
+    }
 
     const handleSearch = async (e) => {
         e.preventDefault()
         if (!query.trim()) return
-        setLoading(true); setError(""); setResults(null); setStrategy(""); setShowCases(false)
+        setLoading(true); setError(""); setResults(null); setStrategy(""); setShowCases(false); setTranslatedQuery("")
         try {
-            const data = await apiPost("/lawyer/similar-cases", { query, k, include_strategy: true })
+            const data = await apiPost("/lawyer/similar-cases", { 
+                query, 
+                k, 
+                include_strategy: true,
+                language: getLanguageName(selectedLanguage)
+            })
             setResults(data.cases)
             setStrategy(data.strategy || "")
+            if (data.translated_query) {
+                setTranslatedQuery(data.translated_query)
+            }
         } catch (err) {
             setError(err.message)
         } finally {
@@ -139,15 +220,76 @@ export default function SimilaritySearch() {
 
             <form onSubmit={handleSearch} className="card p-6 space-y-4 mb-8">
                 <div>
-                    <label className="block text-sm text-gray-400 mb-2">Describe your legal case</label>
-                    <textarea
-                        value={query}
-                        onChange={e => setQuery(e.target.value)}
-                        placeholder="e.g. My client is accused of robbery under IPC 392. Fir states gold chain snatching. Need similar acquittals..."
-                        rows={4}
-                        required
-                        className="input-gold resize-none"
-                    />
+                    <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm text-gray-400 font-medium">Describe your legal case</label>
+                        {isVoiceSupported && (
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={selectedLanguage}
+                                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                                    className="bg-surface border border-border text-white text-xs rounded-lg px-2.5 py-1 outline-none cursor-pointer"
+                                >
+                                    {LANGUAGES.map(lang => (
+                                        <option key={lang.code} value={lang.code}>{lang.label}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    type="button"
+                                    onClick={isListening ? () => recognitionRef.current?.stop() : () => {
+                                        startTextRef.current = query
+                                        try {
+                                            recognitionRef.current?.start()
+                                        } catch (e) {
+                                            console.error(e)
+                                            recognitionRef.current?.stop()
+                                        }
+                                    }}
+                                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all duration-200
+                                        ${isListening 
+                                            ? "bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20" 
+                                            : "bg-gold/10 border-gold/30 text-gold hover:bg-gold/20"
+                                        }`}
+                                >
+                                    <span>{isListening ? "🛑 Stop Mic" : "🎙️ Dictate"}</span>
+                                    {isListening && <span className="w-1.5 h-1.5 bg-red-400 rounded-full animate-ping" />}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    <div className="relative">
+                        <textarea
+                            value={query}
+                            onChange={e => setQuery(e.target.value)}
+                            placeholder="e.g. My client is accused of robbery under IPC 392. Fir states gold chain snatching. Need similar acquittals..."
+                            rows={4}
+                            required
+                            className="input-gold resize-none"
+                        />
+                        {/* Listening visualizer indicator inside textarea */}
+                        {isListening && (
+                            <div className="absolute right-3 bottom-3 flex items-center gap-0.5 h-6 bg-surfaceLight/80 px-2 py-1 rounded border border-border">
+                                <span className="text-[10px] text-red-400 uppercase tracking-wider mr-1 animate-pulse">Recording</span>
+                                {[...Array(4)].map((_, i) => (
+                                    <div 
+                                        key={i} 
+                                        className="w-0.5 bg-red-400 rounded-full animate-bounce"
+                                        style={{ 
+                                            animationDuration: `${0.5 + (i % 2) * 0.2}s`, 
+                                            animationDelay: `${i * 0.1}s`,
+                                            height: `${Math.max(4, (i % 3) * 3 + 4)}px`
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    {/* Translated Query Sub-box */}
+                    {translatedQuery && (
+                        <div className="mt-2 text-xs text-gold/80 bg-gold/5 border border-gold/10 rounded-lg px-3 py-2 flex gap-1.5 items-center animate-fadeIn">
+                            <span className="font-semibold text-gold">🔍 Translated Search Term:</span>
+                            <span>"{translatedQuery}"</span>
+                        </div>
+                    )}
                 </div>
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">

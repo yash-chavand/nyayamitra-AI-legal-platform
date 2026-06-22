@@ -13,11 +13,13 @@ class LoginRequest(BaseModel):
 
 class QuestionRequest(BaseModel):
     question: str
+    language: Optional[str] = "English"
 
 class SimilarityRequest(BaseModel):
     query: str
     k: Optional[int] = 5
     include_strategy: Optional[bool] = True
+    language: Optional[str] = "English"
 
 class DocumentRequest(BaseModel):
     doc_type: str

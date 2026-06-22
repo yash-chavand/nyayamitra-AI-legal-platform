@@ -1,5 +1,20 @@
-import { useState, useEffect } from "react"
-import { apiPost, apiGet, API } from "../utils/auth"
+import { useState, useEffect, useRef } from "react"
+import { apiPost, apiGet, apiPut, API } from "../utils/auth"
+import RichTextEditor from "./RichTextEditor"
+
+const LANGUAGES = [
+    { code: "hi-IN", label: "हिन्दी (Hindi)" },
+    { code: "en-IN", label: "English (India)" },
+    { code: "bn-IN", label: "বাংলা (Bengali)" },
+    { code: "ta-IN", label: "தமிழ் (Tamil)" },
+    { code: "te-IN", label: "తెలుగు (Telugu)" },
+    { code: "mr-IN", label: "मराठी (Marathi)" },
+    { code: "kn-IN", label: "ಕನ್ನಡ (Kannada)" },
+    { code: "gu-IN", label: "ગુજરાતી (Gujarati)" },
+    { code: "ml-IN", label: "മലയാളം (Malayalam)" },
+    { code: "pa-IN", label: "ਪੰਜਾਬੀ (Punjabi)" },
+    { code: "ur-IN", label: "Urdu (Urdu)" }
+]
 
 export default function LawyerDocuments() {
     const [docs, setDocs] = useState([])
@@ -8,6 +23,62 @@ export default function LawyerDocuments() {
     const [generating, setGenerating] = useState(false)
     const [result, setResult] = useState(null)
     const [loadingHistory, setLoadingHistory] = useState(true)
+    
+    const [isEditing, setIsEditing] = useState(false)
+    const [editedContent, setEditedContent] = useState("")
+    const [saving, setSaving] = useState(false)
+
+    useEffect(() => {
+        if (result) {
+            setEditedContent(result.content)
+            setIsEditing(false)
+        }
+    }, [result])
+
+    const [isListening, setIsListening] = useState(false)
+    const [selectedLanguage, setSelectedLanguage] = useState("hi-IN")
+    const recognitionRef = useRef(null)
+    const startTextRef = useRef("")
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    const isVoiceSupported = !!SpeechRecognition
+
+    useEffect(() => {
+        if (!isVoiceSupported) return
+
+        const rec = new SpeechRecognition()
+        rec.continuous = true
+        rec.interimResults = true
+        rec.lang = selectedLanguage
+
+        rec.onstart = () => {
+            setIsListening(true)
+        }
+
+        rec.onresult = (e) => {
+            const currentTranscript = Array.from(e.results)
+                .map(result => result[0].transcript)
+                .join("")
+            setFormData(prev => ({
+                ...prev,
+                details: startTextRef.current + (startTextRef.current ? " " : "") + currentTranscript
+            }))
+        }
+
+        rec.onerror = (e) => {
+            console.error("Speech recognition error:", e.error)
+            setIsListening(false)
+        }
+
+        rec.onend = () => {
+            setIsListening(false)
+        }
+
+        recognitionRef.current = rec
+
+        return () => {
+            rec.stop()
+        }
+    }, [selectedLanguage, isVoiceSupported])
 
     useEffect(() => {
         fetchHistory()
@@ -38,6 +109,21 @@ export default function LawyerDocuments() {
             alert("Generation failed: " + err.message)
         } finally {
             setGenerating(false)
+        }
+    }
+
+    const handleSaveChanges = async () => {
+        if (!result) return
+        setSaving(true)
+        try {
+            await apiPut(`/lawyer/documents/${result.id}`, { content: editedContent })
+            setResult(prev => ({ ...prev, content: editedContent }))
+            setDocs(prev => prev.map(d => d.id === result.id ? { ...d, content: editedContent } : d))
+            setIsEditing(false)
+        } catch (err) {
+            alert("Failed to save changes: " + err.message)
+        } finally {
+            setSaving(false)
         }
     }
 
@@ -128,15 +214,69 @@ export default function LawyerDocuments() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[11px] text-gray-400 uppercase tracking-widest mb-2 block font-bold">Case Details & Specific Facts</label>
-                                    <textarea
-                                        required
-                                        rows={10}
-                                        value={formData.details}
-                                        onChange={e => setFormData({ ...formData, details: e.target.value })}
-                                        placeholder={`Enter case facts, prayer details, or specific requirements for the ${activeType.replace('_', ' ')}...`}
-                                        className="input-gold text-sm py-4 px-4 bg-bg/50 resize-none h-48 leading-relaxed"
-                                    />
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-[11px] text-gray-400 uppercase tracking-widest block font-bold">Case Details & Specific Facts</label>
+                                        {isVoiceSupported && (
+                                            <div className="flex items-center gap-2">
+                                                <select
+                                                    value={selectedLanguage}
+                                                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                                                    className="bg-surface border border-border text-white text-[10px] rounded-lg px-2 py-0.5 outline-none cursor-pointer"
+                                                >
+                                                    {LANGUAGES.map(lang => (
+                                                        <option key={lang.code} value={lang.code}>{lang.label}</option>
+                                                    ))}
+                                                </select>
+                                                <button
+                                                    type="button"
+                                                    onClick={isListening ? () => recognitionRef.current?.stop() : () => {
+                                                        startTextRef.current = formData.details
+                                                        try {
+                                                            recognitionRef.current?.start()
+                                                        } catch (e) {
+                                                            console.error(e)
+                                                            recognitionRef.current?.stop()
+                                                        }
+                                                    }}
+                                                    className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border transition-all duration-200
+                                                        ${isListening 
+                                                            ? "bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20" 
+                                                            : "bg-gold/10 border-gold/30 text-gold hover:bg-gold/20"
+                                                        }`}
+                                                >
+                                                    <span>{isListening ? "🛑 Stop Mic" : "🎙️ Dictate"}</span>
+                                                    {isListening && <span className="w-1.5 h-1.5 bg-red-400 rounded-full animate-ping" />}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="relative">
+                                        <textarea
+                                            required
+                                            rows={10}
+                                            value={formData.details}
+                                            onChange={e => setFormData({ ...formData, details: e.target.value })}
+                                            placeholder={`Enter case facts, prayer details, or specific requirements for the ${activeType.replace('_', ' ')}...`}
+                                            className="input-gold text-sm py-4 px-4 bg-bg/50 resize-none h-48 leading-relaxed"
+                                        />
+                                        {/* Listening visualizer indicator inside textarea */}
+                                        {isListening && (
+                                            <div className="absolute right-3 bottom-3 flex items-center gap-0.5 h-6 bg-surfaceLight/80 px-2 py-1 rounded border border-border">
+                                                <span className="text-[10px] text-red-400 uppercase tracking-wider mr-1 animate-pulse">Recording</span>
+                                                {[...Array(4)].map((_, i) => (
+                                                    <div 
+                                                        key={i} 
+                                                        className="w-0.5 bg-red-400 rounded-full animate-bounce"
+                                                        style={{ 
+                                                            animationDuration: `${0.5 + (i % 2) * 0.2}s`, 
+                                                            animationDelay: `${i * 0.1}s`,
+                                                            height: `${Math.max(4, (i % 3) * 3 + 4)}px`
+                                                        }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                                 <button type="submit" disabled={generating} className="btn-gold w-full py-4 text-base shadow-goldglow hover:shadow-goldglow-lg transition-all active:scale-[0.98]">
                                     {generating ? <span className="flex items-center justify-center gap-2"><div className="spinner-gold !border-black" /> Generating Document...</span> : "🚀 Craft Professional Draft"}
@@ -195,7 +335,7 @@ export default function LawyerDocuments() {
                 <div className="w-full xl:w-[55%] min-h-[500px]">
                     {result ? (
                         <div className="card p-0 border-gold shadow-goldglow-lg overflow-hidden flex flex-col h-full sticky top-8 animate-fadeIn">
-                            <div className="p-5 bg-gold/10 border-b border-gold/20 flex justify-between items-center backdrop-blur-sm">
+                            <div className="p-5 bg-gold/10 border-b border-gold/20 flex justify-between items-center backdrop-blur-sm flex-wrap gap-3">
                                 <div>
                                     <h4 className="text-gold font-bold text-sm tracking-wide">{result.case_title}</h4>
                                     <div className="flex items-center gap-2 mt-0.5">
@@ -204,9 +344,39 @@ export default function LawyerDocuments() {
                                         <span className="text-[10px] text-gold/40">FINAL AI-GENERATED DRAFT</span>
                                     </div>
                                 </div>
-                                <div className="flex gap-3">
+                                <div className="flex gap-3 flex-wrap">
+                                    {isEditing ? (
+                                        <>
+                                            <button
+                                                onClick={handleSaveChanges}
+                                                disabled={saving}
+                                                className="bg-green-500/20 text-green-400 border border-green-400/30 px-3.5 py-1.5 rounded-xl text-xs font-bold hover:bg-green-500/30 transition-all flex items-center gap-1"
+                                            >
+                                                {saving ? <div className="spinner !w-3 !h-3" /> : "💾 Save"}
+                                            </button>
+                                            <button
+                                                onClick={() => { setIsEditing(false); setEditedContent(result.content) }}
+                                                className="text-gray-400 border border-border hover:bg-surfaceLight px-3.5 py-1.5 rounded-xl text-xs transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <button
+                                            onClick={() => setIsEditing(true)}
+                                            className="bg-gold/15 text-gold border border-gold/30 px-3.5 py-1.5 rounded-xl text-xs font-semibold hover:opacity-80 transition-opacity"
+                                        >
+                                            ✏️ Edit Draft
+                                        </button>
+                                    )}
                                     <button
-                                        onClick={() => { navigator.clipboard.writeText(result.content); alert("Copied to clipboard!") }}
+                                        onClick={() => {
+                                            const plainText = /<[a-z][\s\S]*>/i.test(result.content || "")
+                                                ? result.content.replace(/<br\s*\/?>/gi, "\n").replace(/<\/div>/gi, "\n").replace(/<div>/gi, "").replace(/&nbsp;/g, " ").replace(/<[^>]*>/g, "")
+                                                : result.content
+                                            navigator.clipboard.writeText(plainText)
+                                            alert("Copied to clipboard!")
+                                        }}
                                         className="btn-glass px-4 py-2"
                                     >
                                         📋 Copy Text
@@ -219,11 +389,22 @@ export default function LawyerDocuments() {
                                     </button>
                                 </div>
                             </div>
-                            <div className="flex-1 p-12 bg-white text-black overflow-y-auto font-serif text-base leading-[1.8] whitespace-pre-wrap selection:bg-gold/30">
-                                <div className="max-w-[700px] mx-auto shadow-sm">
-                                    {result.content}
+                            {isEditing ? (
+                                <div className="flex-1 p-6 bg-surface/30 overflow-y-auto min-h-[400px]">
+                                    <RichTextEditor value={editedContent} onChange={setEditedContent} />
                                 </div>
-                            </div>
+                            ) : (
+                                <div className="flex-1 p-12 bg-white text-black overflow-y-auto font-serif text-base leading-[1.8] whitespace-pre-wrap selection:bg-gold/30">
+                                    <div 
+                                        className="max-w-[700px] mx-auto shadow-sm"
+                                        dangerouslySetInnerHTML={{
+                                            __html: /<[a-z][\s\S]*>/i.test(result.content || "")
+                                                ? result.content
+                                                : (result.content || "").replace(/\n/g, "<br>")
+                                        }}
+                                    />
+                                </div>
+                            )}
                             <div className="p-4 bg-gray-50 border-t border-gray-200 text-center text-gray-400 text-[10px] uppercase font-bold tracking-widest">
                                 Private & Confidential • Prepared for Legal Consultation
                             </div>

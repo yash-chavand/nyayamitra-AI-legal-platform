@@ -68,3 +68,16 @@ class LawyerDocument(Base):
     content       = Column(Text, nullable=False)
     form_data     = Column(Text, nullable=True) # JSON store for form inputs
     created_at    = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class Hearing(Base):
+    """Stores case hearing schedules and tasks for lawyers"""
+    __tablename__ = "hearings"
+
+    id           = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id      = Column(Integer, ForeignKey("users.id"), nullable=False)
+    case_title   = Column(String(255), nullable=False)
+    hearing_date = Column(String(100), nullable=False) # Store as string for easy UI rendering (e.g. YYYY-MM-DD)
+    bench        = Column(String(255), nullable=True)
+    stage        = Column(String(100), nullable=True) # "Arguments", "Evidence", etc.
+    notes        = Column(Text, nullable=True)
+    created_at   = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

@@ -71,3 +71,8 @@ backend/data/vectors/citizen/*
 !backend/data/pdfs/
 lawyer_help/data/
 legal data/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
