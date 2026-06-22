@@ -35,7 +35,7 @@ export const isLawyer = () => getRole() === "lawyer"
 // ── Fetch helpers ────────────────────────────
 export const BASE_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
     ? "http://127.0.0.1:8000"
-    : "https://nyayamitra-backend.onrender.com";
+    : "https://nyayamitra-ai-legal-platform.onrender.com";
 
 export const API = `${BASE_URL}/api`;
 
