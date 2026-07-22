@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
@@ -15,7 +14,52 @@ BASE_DIR = os.path.dirname(APP_DIR)
 CITIZEN_FAISS_DIR = os.path.join(BASE_DIR, "data", "vectors", "citizen")
 LAWYER_FAISS_DIR  = os.path.join(BASE_DIR, "data", "judgments_index")
 
-embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+# Try loading API-based embeddings first to save RAM on Render
+hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
+
+if hf_token:
+    try:
+        from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+        embeddings = HuggingFaceInferenceAPIEmbeddings(
+            api_key=hf_token,
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+        print("✅ Using Hugging Face Inference API for embeddings (RAM-optimized)")
+    except Exception as e:
+        print(f"⚠️ Failed to load HF Inference API: {e}. Falling back...")
+        try:
+            from langchain_community.embeddings import SentenceTransformerEmbeddings
+            embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+        except:
+            embeddings = None
+else:
+    try:
+        from langchain_community.embeddings import SentenceTransformerEmbeddings
+        embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+        print("✅ Using local SentenceTransformer for embeddings")
+    except Exception as e:
+        # Final serverless fallback if torch/sentence-transformers is not installed (e.g. Render production)
+        class PublicHFEmbeddings:
+            def embed_documents(self, texts):
+                import requests
+                res = requests.post(
+                    "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2",
+                    json={"inputs": texts}
+                )
+                return res.json()
+            def embed_query(self, text):
+                import requests
+                res = requests.post(
+                    "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2",
+                    json={"inputs": [text]}
+                )
+                try:
+                    return res.json()[0]
+                except Exception as api_err:
+                    print(f"Hugging Face public API error: {api_err}")
+                    return [0.0] * 384
+        embeddings = PublicHFEmbeddings()
+        print("✅ Using serverless public Hugging Face endpoint for embeddings (RAM-optimized fallback)")
 
 import re
 
