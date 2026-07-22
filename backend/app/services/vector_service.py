@@ -17,6 +17,36 @@ LAWYER_FAISS_DIR  = os.path.join(BASE_DIR, "data", "judgments_index")
 
 embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
 
+import re
+
+def keyword_search(docs, query: str, k: int = 10):
+    tokens = [t.lower() for t in re.findall(r'\w+', query) if len(t) > 2]
+    if not tokens:
+        return docs[:k]
+    
+    scored_docs = []
+    for doc in docs:
+        score = 0
+        content_lower = doc.page_content.lower()
+        for token in tokens:
+            # Heavier weight for exact word matches
+            matches = len(re.findall(r'\b' + re.escape(token) + r'\b', content_lower))
+            score += matches * 2.0
+            # Partial weight for substring matches
+            if token in content_lower and matches == 0:
+                score += 0.5
+                
+        # Match metadata attributes (like law name)
+        law_name = doc.metadata.get('law_name', '').lower()
+        for token in tokens:
+            if token in law_name:
+                score += 5.0
+                
+        scored_docs.append((doc, score))
+        
+    scored_docs.sort(key=lambda x: x[1], reverse=True)
+    return [doc for doc, score in scored_docs[:k] if score > 0]
+
 def load_vectorstore(path: str, index_name: str = "index"):
     if not os.path.exists(path) or not os.listdir(path):
         print(f"⚠️ Vector store not found at {path}")
@@ -56,10 +86,34 @@ class VectorService:
             search_query = self.translate_to_english(question)
             print(f"DEBUG: Translated user query '{question}' to '{search_query}'")
 
-        print(f"DEBUG: Starting citizen search for: {search_query[:30]}...")
+        print(f"DEBUG: Starting hybrid search for: {search_query[:30]}...")
         start = time.time()
-        docs = self.citizen_vs.similarity_search(search_query, k=3)
-        print(f"DEBUG: Search took {time.time()-start:.2f}s")
+        
+        # 1. Semantic Search (Dense vector)
+        semantic_docs = self.citizen_vs.similarity_search(search_query, k=10)
+        
+        # 2. Keyword Search (Sparse keyword matching)
+        all_docs = list(self.citizen_vs.docstore._dict.values())
+        keyword_docs = keyword_search(all_docs, search_query, k=10)
+        
+        # 3. Reciprocal Rank Fusion (RRF)
+        rrf_scores = {}
+        for rank, doc in enumerate(semantic_docs):
+            doc_id = doc.page_content
+            if doc_id not in rrf_scores:
+                rrf_scores[doc_id] = {"doc": doc, "score": 0.0}
+            rrf_scores[doc_id]["score"] += 1.0 / (60.0 + (rank + 1))
+            
+        for rank, doc in enumerate(keyword_docs):
+            doc_id = doc.page_content
+            if doc_id not in rrf_scores:
+                rrf_scores[doc_id] = {"doc": doc, "score": 0.0}
+            rrf_scores[doc_id]["score"] += 1.0 / (60.0 + (rank + 1))
+            
+        sorted_docs = sorted(rrf_scores.values(), key=lambda x: x["score"], reverse=True)
+        docs = [item["doc"] for item in sorted_docs[:3]]
+        
+        print(f"DEBUG: Hybrid Search took {time.time()-start:.2f}s (RRF Fusion complete)")
         
         context = "\n\n".join([f"[{d.metadata.get('law_name', 'Law')}, pg {d.metadata.get('page','?')}]\n{d.page_content}" for d in docs])
         
@@ -93,10 +147,36 @@ class VectorService:
         if not self.lawyer_vs:
             return []
         
-        docs_with_scores = self.lawyer_vs.similarity_search_with_score(query, k=k)
+        # Get semantic docs with their scores first
+        semantic_docs_with_scores = self.lawyer_vs.similarity_search_with_score(query, k=15)
+        semantic_scores = {doc.page_content: score for doc, score in semantic_docs_with_scores}
+        semantic_docs = [doc for doc, score in semantic_docs_with_scores]
+        
+        # Get keyword matches
+        all_docs = list(self.lawyer_vs.docstore._dict.values())
+        keyword_docs = keyword_search(all_docs, query, k=15)
+        
+        # RRF Fusion
+        rrf_scores = {}
+        for rank, doc in enumerate(semantic_docs):
+            doc_id = doc.page_content
+            if doc_id not in rrf_scores:
+                rrf_scores[doc_id] = {"doc": doc, "score": 0.0}
+            rrf_scores[doc_id]["score"] += 1.0 / (60.0 + (rank + 1))
+            
+        for rank, doc in enumerate(keyword_docs):
+            doc_id = doc.page_content
+            if doc_id not in rrf_scores:
+                rrf_scores[doc_id] = {"doc": doc, "score": 0.0}
+            rrf_scores[doc_id]["score"] += 1.0 / (60.0 + (rank + 1))
+            
+        sorted_docs = sorted(rrf_scores.values(), key=lambda x: x["score"], reverse=True)
+        top_docs = [item["doc"] for item in sorted_docs[:k]]
+        
         results = []
-        for doc, score in docs_with_scores:
+        for doc in top_docs:
             case_id = doc.metadata.get("case_id", "Unknown Case")
+            score = semantic_scores.get(doc.page_content, 0.35) # default score if only keyword-matched
             results.append({
                 "case_name": case_id.replace("_", " ").title(),
                 "year": doc.metadata.get("year", "N/A"),
