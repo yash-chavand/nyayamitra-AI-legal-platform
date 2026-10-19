@@ -1,6 +1,5 @@
 import os
 import logging
-import faiss
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,17 +40,11 @@ FAISS_PATH = os.path.join(
     "lawyer_case_index.faiss"
 )
 
-# Global FAISS index storage
-lawyer_index = None
-
-
 # ---------------------------------------------------
 # Startup Event (SAFE FOR RENDER)
 # ---------------------------------------------------
 @app.on_event("startup")
 def startup_event():
-    global lawyer_index
-
     logger.info("🚀 Starting NyayaMitra Backend...")
 
     # ✅ Safe Database Initialization
@@ -61,14 +54,8 @@ def startup_event():
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
 
-    # ✅ Safe FAISS Load
-    if os.path.exists(FAISS_PATH):
-        try:
-            lawyer_index = faiss.read_index(FAISS_PATH)
-            logger.info(f"✅ FAISS Index loaded from {FAISS_PATH}")
-        except Exception as e:
-            logger.error(f"❌ Failed to load FAISS index: {e}")
-    else:
+    # Keep process startup light; vector indexes are loaded on the first AI request.
+    if not os.path.exists(FAISS_PATH):
         logger.warning(f"⚠️ FAISS index not found at {FAISS_PATH}")
 
 
@@ -116,5 +103,5 @@ def health_check():
     return {
         "status": "online",
         "message": "⚖️ NyayaMitra API is operational",
-        "faiss_loaded": lawyer_index is not None
+        "faiss_index_available": os.path.exists(FAISS_PATH)
     }

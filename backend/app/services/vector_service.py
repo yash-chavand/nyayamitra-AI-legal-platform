@@ -14,52 +14,61 @@ BASE_DIR = os.path.dirname(APP_DIR)
 CITIZEN_FAISS_DIR = os.path.join(BASE_DIR, "data", "vectors", "citizen")
 LAWYER_FAISS_DIR  = os.path.join(BASE_DIR, "data", "judgments_index")
 
-# Try loading API-based embeddings first to save RAM on Render
-hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
+class LazyEmbeddings:
+    """Load the embedding model on the first vector search, not during API startup."""
 
-if hf_token:
-    try:
-        from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-        embeddings = HuggingFaceInferenceAPIEmbeddings(
-            api_key=hf_token,
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
-        print("✅ Using Hugging Face Inference API for embeddings (RAM-optimized)")
-    except Exception as e:
-        print(f"⚠️ Failed to load HF Inference API: {e}. Falling back...")
+    def __init__(self):
+        self._backend = None
+
+    def _get_backend(self):
+        if self._backend is not None:
+            return self._backend
+
+        hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
+        if hf_token:
+            try:
+                from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+                self._backend = HuggingFaceInferenceAPIEmbeddings(
+                    api_key=hf_token,
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+                print("✅ Using Hugging Face Inference API for embeddings")
+                return self._backend
+            except Exception as e:
+                print(f"⚠️ Failed to configure Hugging Face embeddings: {e}. Falling back to local model.")
+
         try:
             from langchain_community.embeddings import SentenceTransformerEmbeddings
-            embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-        except:
-            embeddings = None
-else:
-    try:
-        from langchain_community.embeddings import SentenceTransformerEmbeddings
-        embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-        print("✅ Using local SentenceTransformer for embeddings")
-    except Exception as e:
-        # Final serverless fallback if torch/sentence-transformers is not installed (e.g. Render production)
-        class PublicHFEmbeddings:
-            def embed_documents(self, texts):
-                import requests
-                res = requests.post(
-                    "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2",
-                    json={"inputs": texts}
-                )
-                return res.json()
-            def embed_query(self, text):
-                import requests
-                res = requests.post(
-                    "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2",
-                    json={"inputs": [text]}
-                )
-                try:
-                    return res.json()[0]
-                except Exception as api_err:
-                    print(f"Hugging Face public API error: {api_err}")
-                    return [0.0] * 384
-        embeddings = PublicHFEmbeddings()
-        print("✅ Using serverless public Hugging Face endpoint for embeddings (RAM-optimized fallback)")
+            self._backend = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+            print("✅ Using local SentenceTransformer embeddings")
+        except Exception as e:
+            print(f"⚠️ Local embeddings unavailable: {e}. Using Hugging Face inference endpoint.")
+
+            class PublicHFEmbeddings:
+                def embed_documents(self, texts):
+                    import requests
+                    response = requests.post(
+                        "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2",
+                        json={"inputs": texts}, timeout=30
+                    )
+                    response.raise_for_status()
+                    return response.json()
+
+                def embed_query(self, text):
+                    return self.embed_documents([text])[0]
+
+            self._backend = PublicHFEmbeddings()
+
+        return self._backend
+
+    def embed_documents(self, texts):
+        return self._get_backend().embed_documents(texts)
+
+    def embed_query(self, text):
+        return self._get_backend().embed_query(text)
+
+
+embeddings = LazyEmbeddings()
 
 import re
 
@@ -99,13 +108,31 @@ def load_vectorstore(path: str, index_name: str = "index"):
 
 class VectorService:
     def __init__(self):
-        self.citizen_vs = load_vectorstore(CITIZEN_FAISS_DIR)
-        self.lawyer_vs  = load_vectorstore(LAWYER_FAISS_DIR, index_name="lawyer_case_index")
-        self.llm = ChatGroq(
-            model="llama-3.1-8b-instant",
-            api_key=os.getenv("GROQ_API_KEY"),
-            temperature=0.6
-        )
+        self._citizen_vs = None
+        self._lawyer_vs = None
+        self._llm = None
+
+    @property
+    def citizen_vs(self):
+        if self._citizen_vs is None:
+            self._citizen_vs = load_vectorstore(CITIZEN_FAISS_DIR)
+        return self._citizen_vs
+
+    @property
+    def lawyer_vs(self):
+        if self._lawyer_vs is None:
+            self._lawyer_vs = load_vectorstore(LAWYER_FAISS_DIR, index_name="lawyer_case_index")
+        return self._lawyer_vs
+
+    @property
+    def llm(self):
+        if self._llm is None:
+            self._llm = ChatGroq(
+                model="llama-3.1-8b-instant",
+                api_key=os.getenv("GROQ_API_KEY"),
+                temperature=0.6
+            )
+        return self._llm
 
     def translate_to_english(self, text: str) -> str:
         messages = [
