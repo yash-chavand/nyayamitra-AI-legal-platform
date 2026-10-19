@@ -15,7 +15,7 @@ const SUGGESTIONS = [
 function SourceCard({ source }) {
     return (
         <div className="bg-primary/5 border border-primary/20 rounded-xl px-3 py-2 text-xs">
-            <div className="text-primary font-semibold">{source.law}</div>
+            <div className="text-primary font-semibold">{source.url ? <a href={source.url} target="_blank" rel="noreferrer" className="hover:underline">{source.law} ↗</a> : source.law}</div>
             <div className="text-gray-500">Page {source.page}</div>
             <div className="text-gray-400 mt-1 line-clamp-2">{source.excerpt}</div>
         </div>
@@ -43,16 +43,17 @@ function MessageBubble({ msg }) {
 }
 
 export default function ChatPage() {
+    const location = useLocation()
     const [messages, setMessages] = useState([{
         role: "assistant",
         content: `Namaste! 🙏 I'm your Indian Legal Assistant. I can help you understand:\n\n• **Indian Constitution** & Fundamental Rights\n• **Indian Penal Code (IPC)**\n• **RTI Act 2005**\n• **Consumer Protection Act 2019**\n• **Code of Criminal Procedure (CrPC)**\n\nAsk me any legal question in plain English!`,
         sources: []
     }])
     const [input, setInput] = useState("")
+    const [language, setLanguage] = useState(location.state?.language || "English")
     const [loading, setLoading] = useState(false)
     const bottomRef = useRef(null)
     const navigate = useNavigate()
-    const location = useLocation()
 
     // If navigated with a pre-filled question OR history
     useEffect(() => {
@@ -78,7 +79,7 @@ export default function ChatPage() {
         setMessages(prev => [...prev, { role: "user", content: q, sources: [] }])
         setLoading(true)
         try {
-            const data = await apiPost("/citizen/ask", { question: q })
+            const data = await apiPost("/citizen/ask", { question: q, language })
             setMessages(prev => [...prev, { role: "assistant", content: data.answer, sources: data.sources || [] }])
         } catch (err) {
             if (err.message.includes("401")) { clearSession(); navigate("/login") }
@@ -102,7 +103,11 @@ export default function ChatPage() {
                         <p className="text-gray-500 text-xs">Powered by RAG · FAISS · Groq LLaMA</p>
                     </div>
                 </div>
-                <div className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse" title="Live" />
+                <label className="flex items-center gap-2 text-xs text-gray-400">Answer in
+                    <select value={language} onChange={e => setLanguage(e.target.value)} className="bg-surfaceLight border border-border rounded-lg px-2 py-1.5 text-white">
+                        {["English", "Hindi", "Bengali", "Tamil", "Telugu", "Marathi", "Kannada", "Gujarati", "Malayalam", "Punjabi", "Urdu"].map(item => <option key={item}>{item}</option>)}
+                    </select>
+                </label>
             </header>
 
             {/* Suggestions */}

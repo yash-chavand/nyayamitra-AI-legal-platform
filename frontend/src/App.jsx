@@ -7,6 +7,7 @@ import Register from "./pages/Register"
 import CitizenDashboard from "./pages/CitizenDashboard"
 import LawyerDashboard from "./pages/LawyerDashboard"
 import ChatPage from "./pages/ChatPage"
+import ClientIntakePage from "./pages/ClientIntakePage"
 
 function ProtectedRoute({ children }) {
     return isAuthenticated() ? children : <Navigate to="/login" replace />
@@ -26,6 +27,7 @@ export default function App() {
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                <Route path="/intake/:token" element={<ClientIntakePage />} />
 
                 {/* Citizen */}
                 <Route path="/citizen" element={

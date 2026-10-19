@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { apiGet, apiDelete, apiPut, API } from "../utils/auth"
+import { apiGet, apiDelete, apiPut, API, API_CONFIGURATION_ERROR } from "../utils/auth"
 import RichTextEditor from "./RichTextEditor"
 
 const TYPE_CONFIG = {
@@ -15,6 +15,7 @@ export default function SavedDrafts() {
     const [isEditing, setIsEditing] = useState(false)
     const [editedContent, setEditedContent] = useState("")
     const [saving, setSaving] = useState(false)
+    const [versions, setVersions] = useState([])
 
     useEffect(() => { fetchDrafts() }, [])
 
@@ -27,7 +28,9 @@ export default function SavedDrafts() {
     const openDraft = async (id) => {
         try {
             const draftData = await apiGet(`/citizen/drafts/${id}`)
+            const history = await apiGet(`/citizen/drafts/${id}/versions`)
             setModal(draftData)
+            setVersions(history)
             setEditedContent(draftData.content)
             setIsEditing(false)
         }
@@ -109,6 +112,12 @@ export default function SavedDrafts() {
                                 }}
                             />
                         )}
+                        <details className="px-6 pb-3 border-t border-border pt-3">
+                            <summary className="text-xs text-primary cursor-pointer">Version history ({versions.length})</summary>
+                            <div className="max-h-32 overflow-auto space-y-2 mt-3">
+                                {versions.length ? versions.map(version => <div key={version.id} className="flex items-center justify-between gap-3 text-xs"><span className="text-gray-400">Saved before edit · {fmt(version.created_at)}</span><button onClick={async () => { try { await apiPut(`/citizen/drafts/${modal.id}`, { content: version.content }); setModal(prev => ({ ...prev, content: version.content })); setEditedContent(version.content); setIsEditing(false); setVersions(await apiGet(`/citizen/drafts/${modal.id}/versions`)) } catch (err) { alert("Could not restore version: " + err.message) } }} className="text-primary hover:underline">Restore</button></div>) : <p className="text-xs text-gray-500">Earlier versions will appear here after you edit and save this draft.</p>}
+                            </div>
+                        </details>
                         <div className="flex gap-3 px-6 py-4 border-t border-border flex-shrink-0 flex-wrap">
                             {isEditing ? (
                                 <>
@@ -119,6 +128,7 @@ export default function SavedDrafts() {
                                                 await apiPut(`/citizen/drafts/${modal.id}`, { content: editedContent })
                                                 setModal(prev => ({ ...prev, content: editedContent }))
                                                 setDrafts(prev => prev.map(d => d.id === modal.id ? { ...d, content: editedContent } : d))
+                                                setVersions(await apiGet(`/citizen/drafts/${modal.id}/versions`))
                                                 setIsEditing(false)
                                             } catch (err) {
                                                 alert("Failed to save changes: " + err.message)
@@ -157,6 +167,7 @@ export default function SavedDrafts() {
                                     </button>
                                     <button onClick={async () => {
                                         try {
+                                            if (!API) throw new Error(API_CONFIGURATION_ERROR)
                                             const token = localStorage.getItem("legal_token")
                                             const res = await fetch(`${API}/citizen/download-docx/${modal.id}`, {
                                                 headers: { "Authorization": `Bearer ${token}` }

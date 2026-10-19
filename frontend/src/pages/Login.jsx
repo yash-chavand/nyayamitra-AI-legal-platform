@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate, Link } from "react-router-dom"
-import { API, setSession } from "../utils/auth"
+import { API, API_CONFIGURATION_ERROR, setSession } from "../utils/auth"
 
 export default function Login() {
     const [form, setForm] = useState({ email: "", password: "" })
@@ -13,6 +13,7 @@ export default function Login() {
         setError("")
         setLoading(true)
         try {
+            if (!API) throw new Error(API_CONFIGURATION_ERROR)
             const res = await fetch(`${API}/auth/login`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

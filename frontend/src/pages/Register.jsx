@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate, Link } from "react-router-dom"
-import { API, setSession } from "../utils/auth"
+import { API, API_CONFIGURATION_ERROR, setSession } from "../utils/auth"
 
 const ROLES = [
     { key: "citizen", icon: "👤", label: "Citizen", desc: "Legal Q&A, document drafting" },
@@ -18,6 +18,7 @@ export default function Register() {
         setError("")
         setLoading(true)
         try {
+            if (!API) throw new Error(API_CONFIGURATION_ERROR)
             const res = await fetch(`${API}/auth/register`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

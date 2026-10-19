@@ -79,6 +79,7 @@ function CaseCard({ c, index, onChat }) {
                         <span className="text-gold font-bold text-sm">#{index + 1}</span>
                         <span className="badge-criminal">{c.case_type || "Criminal"}</span>
                         {c.year && <span className="text-gray-500 text-xs">{c.year}</span>}
+                        {c.court && <span className="text-gray-500 text-xs">· {c.court}</span>}
                     </div>
                     <h3 className="text-white font-semibold text-sm leading-snug">{c.case_name}</h3>
                 </div>
@@ -119,6 +120,7 @@ function CaseCard({ c, index, onChat }) {
 export default function SimilaritySearch() {
     const [query, setQuery] = useState("")
     const [k, setK] = useState(5)
+    const [filters, setFilters] = useState({ court: "", case_type: "", year_from: "", year_to: "" })
     const [results, setResults] = useState(null)
     const [strategy, setStrategy] = useState("")
     const [loading, setLoading] = useState(false)
@@ -195,7 +197,11 @@ export default function SimilaritySearch() {
                 query, 
                 k, 
                 include_strategy: true,
-                language: getLanguageName(selectedLanguage)
+                language: getLanguageName(selectedLanguage),
+                court: filters.court || null,
+                case_type: filters.case_type || null,
+                year_from: filters.year_from ? Number(filters.year_from) : null,
+                year_to: filters.year_to ? Number(filters.year_to) : null
             })
             setResults(data.cases)
             setStrategy(data.strategy || "")
@@ -301,6 +307,12 @@ export default function SimilaritySearch() {
                     <button type="submit" disabled={loading || !query.trim()} className="btn-gold flex items-center gap-2 ml-auto px-6">
                         {loading ? <><div className="spinner-gold" /> Searching…</> : "🔍 Generate Strategy"}
                     </button>
+                </div>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 border-t border-border pt-4">
+                    <label className="text-xs text-gray-400">Court<input value={filters.court} onChange={e => setFilters({ ...filters, court: e.target.value })} placeholder="e.g. Supreme Court" className="input-gold mt-1.5 w-full text-sm" /></label>
+                    <label className="text-xs text-gray-400">Case type / topic<input value={filters.case_type} onChange={e => setFilters({ ...filters, case_type: e.target.value })} placeholder="e.g. Criminal" className="input-gold mt-1.5 w-full text-sm" /></label>
+                    <label className="text-xs text-gray-400">Year from<input type="number" min="1800" max="2100" value={filters.year_from} onChange={e => setFilters({ ...filters, year_from: e.target.value })} placeholder="Start year" className="input-gold mt-1.5 w-full text-sm" /></label>
+                    <label className="text-xs text-gray-400">Year to<input type="number" min="1800" max="2100" value={filters.year_to} onChange={e => setFilters({ ...filters, year_to: e.target.value })} placeholder="End year" className="input-gold mt-1.5 w-full text-sm" /></label>
                 </div>
                 {error && <div className="bg-red-500/10 border border-red-400/30 rounded-xl px-4 py-3 text-red-400 text-sm">{error}</div>}
             </form>

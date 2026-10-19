@@ -1,16 +1,107 @@
 import json
 import os
 import io
+import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from pypdf import PdfReader
 from ...db.database import get_db
-from ...db.models import User, SimilaritySearch, CaseMetadata, Hearing
+from ...db.models import User, SimilaritySearch, CaseMetadata, Hearing, ClientMatter
 from ...core.auth import get_current_user, require_lawyer
-from ...schemas.schemas import SimilarityRequest
+from ...schemas.schemas import SimilarityRequest, MatterRequest, IntakeSubmission
 from ...services.vector_service import vector_service
 
 router = APIRouter(tags=["Lawyer - Case Similarity"])
+
+@router.get("/matters")
+def list_matters(current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
+    matters = db.query(ClientMatter).filter(ClientMatter.user_id == current_user.id).order_by(ClientMatter.created_at.desc()).all()
+    return [{
+        "id": m.id, "client_name": m.client_name, "contact_email": m.contact_email,
+        "matter_title": m.matter_title, "status": m.status, "next_action": m.next_action,
+        "next_action_date": m.next_action_date, "notes": m.notes,
+        "intake_token": m.intake_token, "intake_expires_at": m.intake_expires_at,
+        "intake_submitted_at": m.intake_submitted_at, "intake_data": json.loads(m.intake_data) if m.intake_data else None
+    } for m in matters]
+
+@router.post("/matters")
+def create_matter(body: MatterRequest, current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
+    if not body.client_name.strip() or not body.matter_title.strip():
+        raise HTTPException(status_code=400, detail="Client name and matter title are required")
+    matter = ClientMatter(
+        user_id=current_user.id, client_name=body.client_name.strip(),
+        contact_email=body.contact_email, matter_title=body.matter_title.strip(),
+        status=body.status or "Intake", next_action=body.next_action,
+        next_action_date=body.next_action_date, notes=body.notes,
+        intake_token=secrets.token_urlsafe(32),
+        intake_expires_at=datetime.now(timezone.utc) + timedelta(days=30)
+    )
+    db.add(matter)
+    db.commit()
+    db.refresh(matter)
+    return {"id": matter.id, "client_name": matter.client_name, "matter_title": matter.matter_title,
+            "status": matter.status, "intake_token": matter.intake_token,
+            "intake_expires_at": matter.intake_expires_at}
+
+@router.delete("/matters/{matter_id}")
+def delete_matter(matter_id: int, current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
+    matter = db.query(ClientMatter).filter(ClientMatter.id == matter_id, ClientMatter.user_id == current_user.id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    db.delete(matter)
+    db.commit()
+    return {"message": "Matter deleted"}
+
+@router.put("/matters/{matter_id}")
+def update_matter(matter_id: int, body: MatterRequest, current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
+    matter = db.query(ClientMatter).filter(ClientMatter.id == matter_id, ClientMatter.user_id == current_user.id).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+    for field in ("client_name", "contact_email", "matter_title", "status", "next_action", "next_action_date", "notes"):
+        value = getattr(body, field)
+        if value is not None:
+            setattr(matter, field, value.strip() if isinstance(value, str) else value)
+    db.commit()
+    db.refresh(matter)
+    return {"id": matter.id, "client_name": matter.client_name, "contact_email": matter.contact_email,
+            "matter_title": matter.matter_title, "status": matter.status, "next_action": matter.next_action,
+            "next_action_date": matter.next_action_date, "notes": matter.notes,
+            "intake_token": matter.intake_token, "intake_submitted_at": matter.intake_submitted_at,
+            "intake_data": json.loads(matter.intake_data) if matter.intake_data else None}
+
+def _active_intake(token: str, db: Session):
+    matter = db.query(ClientMatter).filter(ClientMatter.intake_token == token).first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="This intake link is invalid")
+    expires_at = matter.intake_expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="This intake link has expired")
+    return matter
+
+@router.get("/intake/{token}")
+def get_intake_form(token: str, db: Session = Depends(get_db)):
+    matter = _active_intake(token, db)
+    if matter.intake_submitted_at:
+        raise HTTPException(status_code=409, detail="This intake form has already been submitted")
+    lawyer = db.query(User).filter(User.id == matter.user_id).first()
+    return {"matter_title": matter.matter_title, "lawyer_name": lawyer.username if lawyer else "Your lawyer"}
+
+@router.post("/intake/{token}")
+def submit_intake(token: str, body: IntakeSubmission, db: Session = Depends(get_db)):
+    matter = _active_intake(token, db)
+    if matter.intake_submitted_at:
+        raise HTTPException(status_code=409, detail="This intake form has already been submitted")
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="Consent is required to send this information")
+    if not body.full_name.strip() or not body.email.strip() or not body.matter_summary.strip():
+        raise HTTPException(status_code=400, detail="Name, email, and matter summary are required")
+    matter.intake_data = json.dumps(body.dict(), ensure_ascii=False)
+    matter.intake_submitted_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"message": "Your information was sent securely to the lawyer."}
 
 @router.post("/similar-cases")
 def similar_cases(body: SimilarityRequest, current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
@@ -23,7 +114,28 @@ def similar_cases(body: SimilarityRequest, current_user: User = Depends(require_
         search_query = vector_service.translate_to_english(body.query)
         print(f"DEBUG: Translated lawyer query '{body.query}' to '{search_query}'")
 
-    cases = vector_service.find_similar_cases(search_query, k=body.k)
+    cases = vector_service.find_similar_cases(search_query, k=max(body.k or 5, 25))
+    metadata_by_file = {}
+    for record in db.query(CaseMetadata).all():
+        for candidate in (record.pdf_path, record.case_name):
+            if candidate:
+                metadata_by_file[os.path.basename(candidate).casefold()] = record
+    for case in cases:
+        source = os.path.basename(case.get("source") or case.get("pdf_path") or "").casefold()
+        record = metadata_by_file.get(source)
+        if record:
+            case["year"] = record.year if record.year else case.get("year")
+            case["case_type"] = record.case_type or case.get("case_type")
+            case["pdf_path"] = record.pdf_path or case.get("pdf_path")
+    if body.court:
+        cases = [case for case in cases if body.court.casefold() in str(case.get("court", "")).casefold()]
+    if body.case_type:
+        cases = [case for case in cases if body.case_type.casefold() in str(case.get("case_type", "")).casefold()]
+    if body.year_from is not None:
+        cases = [case for case in cases if str(case.get("year", "")).isdigit() and int(case["year"]) >= body.year_from]
+    if body.year_to is not None:
+        cases = [case for case in cases if str(case.get("year", "")).isdigit() and int(case["year"]) <= body.year_to]
+    cases = cases[:max(1, min(body.k or 5, 20))]
     
     # Ensure PDF links are properly mapped for the frontend
     for case in cases:

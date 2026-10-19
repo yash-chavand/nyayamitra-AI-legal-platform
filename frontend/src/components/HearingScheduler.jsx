@@ -79,6 +79,19 @@ export default function HearingScheduler() {
         return d >= new Date()
     }
 
+    const downloadCalendarEvent = (hearing) => {
+        const escapeText = value => String(value || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n")
+        const start = new Date(hearing.hearing_date)
+        if (Number.isNaN(start.getTime())) return
+        const end = new Date(start.getTime() + 60 * 60 * 1000)
+        const toUtc = date => date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
+        const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//NyayaMitra//Hearing Calendar//EN", "BEGIN:VEVENT", `UID:nyayamitra-hearing-${hearing.id}@nyayamitra`, `DTSTAMP:${toUtc(new Date())}`, `DTSTART:${toUtc(start)}`, `DTEND:${toUtc(end)}`, `SUMMARY:${escapeText(hearing.case_title)}`, `LOCATION:${escapeText(hearing.bench)}`, `DESCRIPTION:${escapeText([hearing.stage, hearing.notes].filter(Boolean).join(" — "))}`, "END:VEVENT", "END:VCALENDAR"].join("\r\n")
+        const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar;charset=utf-8" }))
+        const link = document.createElement("a")
+        link.href = url; link.download = `hearing-${hearing.id}.ics`; link.click()
+        URL.revokeObjectURL(url)
+    }
+
     return (
         <div className="max-w-7xl mx-auto space-y-8 animate-fadeIn pb-20">
             <div>
@@ -246,6 +259,13 @@ export default function HearingScheduler() {
 
                                         {/* Actions */}
                                         <div className="flex gap-2 self-end md:self-start">
+                                            <button
+                                                onClick={() => downloadCalendarEvent(hearing)}
+                                                className="text-[10px] px-2.5 h-8 flex items-center justify-center bg-surfaceLight hover:bg-gold/10 text-gold rounded-lg transition-colors"
+                                                title="Add this hearing to your calendar"
+                                            >
+                                                Calendar
+                                            </button>
                                             <button 
                                                 onClick={() => handleEdit(hearing)}
                                                 className="w-8 h-8 flex items-center justify-center bg-surfaceLight hover:bg-gold/20 text-gold rounded-lg transition-colors"

@@ -189,9 +189,9 @@ class VectorService:
         context = "\n\n".join([f"[{d.metadata.get('law_name', 'Law')}, pg {d.metadata.get('page','?')}]\n{d.page_content}" for d in docs])
         
         if is_multilingual:
-            system_prompt = f"You are a friendly Indian legal assistant. You MUST write your entire answer in {language}. Use plain language. Keep it under 200 words."
+            system_prompt = f"You are a friendly Indian legal information assistant. You MUST write your entire answer in {language}. Use plain language and keep it under 200 words. Base legal claims on the supplied context, refer to the law and page labels shown there, and say when the context does not establish an answer. Do not invent citations."
         else:
-            system_prompt = "You are a friendly Indian legal assistant. Use plain English. Keep it under 200 words."
+            system_prompt = "You are a friendly Indian legal information assistant. Use plain English and keep it under 200 words. Base legal claims on the supplied context, refer to the law and page labels shown there, and say when the context does not establish an answer. Do not invent citations."
 
         prompt = f"Context:\n{context}\n\nUser Intent: {intent}\nInstruction: {instruction}\n\nQuestion (original): {question}\nQuestion (in English): {search_query}"
         
@@ -207,7 +207,12 @@ class VectorService:
             print(f"ERROR: LLM invocation failed: {e}")
             answer = f"⚠️ [Local Demo Mode - LLM Offline]\n\nBased on Indian legal context for your query:\n\n{context[:600]}...\n\n(To enable full AI chat, please configure a valid GROQ_API_KEY in the backend/.env file)"
         
-        sources = [{"law": d.metadata.get("law_name"), "page": d.metadata.get("page")} for d in docs]
+        sources = [{
+            "law": d.metadata.get("law_name", "Legal source"),
+            "page": d.metadata.get("page"),
+            "excerpt": d.page_content[:360],
+            "url": d.metadata.get("source_url") or d.metadata.get("url")
+        } for d in docs]
         return {
             "answer": answer,
             "sources": sources,
@@ -251,9 +256,12 @@ class VectorService:
             results.append({
                 "case_name": case_id.replace("_", " ").title(),
                 "year": doc.metadata.get("year", "N/A"),
+                "court": doc.metadata.get("court") or doc.metadata.get("court_name") or "Supreme Court of India",
+                "case_type": doc.metadata.get("case_type") or doc.metadata.get("law_area") or "Criminal",
                 "excerpt": doc.page_content[:500] + "...",
                 "similarity": round(1 - score, 3),
-                "pdf_path": doc.metadata.get("pdf_path")
+                "pdf_path": doc.metadata.get("pdf_path"),
+                "source": doc.metadata.get("source")
             })
         return results
 
@@ -710,6 +718,20 @@ Advocate for the Party
     def summarize_legal_document(self, text: str) -> dict:
         import json
         import re
+        date_pattern = re.compile(
+            r"\b(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b",
+            re.IGNORECASE,
+        )
+        important_dates = []
+        for match in date_pattern.finditer(text):
+            start, end = match.span()
+            excerpt = re.sub(r"\s+", " ", text[max(0, start - 90):min(len(text), end + 120)]).strip()
+            item = {"date": match.group(0), "context": excerpt}
+            if item not in important_dates:
+                important_dates.append(item)
+            if len(important_dates) >= 20:
+                break
+
         messages = [
             SystemMessage(content=(
                 "You are an expert Indian legal citation extractor and document summarizer. "
@@ -732,7 +754,9 @@ Advocate for the Party
             # Clean possible markdown JSON wrappers if LLM still outputs them
             if content.startswith("```"):
                 content = content.replace("```json", "").replace("```", "").strip()
-            return json.loads(content)
+            result = json.loads(content)
+            result["important_dates"] = important_dates
+            return result
         except Exception as e:
             print(f"Summarization failed: {e}")
             # Fallback mock summary
@@ -749,7 +773,8 @@ Advocate for the Party
                     "(To enable full AI legal document summarization, please configure a valid GROQ_API_KEY in the backend/.env file)"
                 ),
                 "holding": "Could not extract decision.",
-                "counter_arguments": "Could not extract arguments."
+                "counter_arguments": "Could not extract arguments.",
+                "important_dates": important_dates
             }
 
 vector_service = VectorService()

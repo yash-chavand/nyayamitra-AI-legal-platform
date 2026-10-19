@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { apiPost, apiGet, apiPut, API } from "../utils/auth"
+import { apiPost, apiGet, apiPut, API, API_CONFIGURATION_ERROR } from "../utils/auth"
 import RichTextEditor from "./RichTextEditor"
 
 const LANGUAGES = [
@@ -27,6 +27,7 @@ export default function LawyerDocuments() {
     const [isEditing, setIsEditing] = useState(false)
     const [editedContent, setEditedContent] = useState("")
     const [saving, setSaving] = useState(false)
+    const [versions, setVersions] = useState([])
 
     useEffect(() => {
         if (result) {
@@ -34,6 +35,11 @@ export default function LawyerDocuments() {
             setIsEditing(false)
         }
     }, [result])
+
+    useEffect(() => {
+        if (!result?.id) { setVersions([]); return }
+        apiGet(`/lawyer/documents/${result.id}/versions`).then(setVersions).catch(() => setVersions([]))
+    }, [result?.id])
 
     const [isListening, setIsListening] = useState(false)
     const [selectedLanguage, setSelectedLanguage] = useState("hi-IN")
@@ -118,6 +124,7 @@ export default function LawyerDocuments() {
         try {
             await apiPut(`/lawyer/documents/${result.id}`, { content: editedContent })
             setResult(prev => ({ ...prev, content: editedContent }))
+            setVersions(await apiGet(`/lawyer/documents/${result.id}/versions`))
             setDocs(prev => prev.map(d => d.id === result.id ? { ...d, content: editedContent } : d))
             setIsEditing(false)
         } catch (err) {
@@ -128,6 +135,7 @@ export default function LawyerDocuments() {
     }
 
     const downloadPDF = async (doc) => {
+        if (!API) { alert(API_CONFIGURATION_ERROR); return }
         try {
             const response = await fetch(`${API}/lawyer/documents/export-pdf`, {
                 method: "POST",
@@ -405,6 +413,12 @@ export default function LawyerDocuments() {
                                     />
                                 </div>
                             )}
+                            <details className="px-5 py-3 border-t border-border bg-surface/80">
+                                <summary className="text-xs text-gold cursor-pointer">Version history ({versions.length})</summary>
+                                <div className="max-h-32 overflow-auto space-y-2 mt-3">
+                                    {versions.length ? versions.map(version => <div key={version.id} className="flex items-center justify-between gap-3 text-xs"><span className="text-gray-400">Saved before edit · {new Date(version.created_at).toLocaleString()}</span><button onClick={async () => { try { await apiPut(`/lawyer/documents/${result.id}`, { content: version.content }); setResult(prev => ({ ...prev, content: version.content })); setEditedContent(version.content); setIsEditing(false); setVersions(await apiGet(`/lawyer/documents/${result.id}/versions`)) } catch (err) { alert("Could not restore version: " + err.message) } }} className="text-gold hover:underline">Restore</button></div>) : <p className="text-xs text-gray-500">Earlier versions will appear here after you edit and save this document.</p>}
+                                </div>
+                            </details>
                             <div className="p-4 bg-gray-50 border-t border-gray-200 text-center text-gray-400 text-[10px] uppercase font-bold tracking-widest">
                                 Private & Confidential • Prepared for Legal Consultation
                             </div>

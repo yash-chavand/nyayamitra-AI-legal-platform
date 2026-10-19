@@ -1,7 +1,7 @@
 import { useState } from "react"
-import { API } from "../utils/auth"
+import { API, API_CONFIGURATION_ERROR } from "../utils/auth"
 
-export default function DocumentSummarizer() {
+export default function DocumentSummarizer({ endpoint = "/lawyer/summarize-document" }) {
     const [file, setFile] = useState(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState("")
@@ -10,6 +10,11 @@ export default function DocumentSummarizer() {
     const handleFileChange = (e) => {
         setError("")
         const selectedFile = e.target.files[0]
+        if (selectedFile && selectedFile.size > 10 * 1024 * 1024) {
+            setError("PDF must be 10 MB or smaller.")
+            setFile(null)
+            return
+        }
         if (selectedFile && selectedFile.type !== "application/pdf") {
             setError("Please upload a PDF file.")
             setFile(null)
@@ -25,12 +30,18 @@ export default function DocumentSummarizer() {
         setError("")
         setSummary(null)
 
+        if (!API) {
+            setError(API_CONFIGURATION_ERROR)
+            setLoading(false)
+            return
+        }
+
         const formData = new FormData()
         formData.append("file", file)
 
         try {
             const token = localStorage.getItem("legal_token")
-            const response = await fetch(`${API}/lawyer/summarize-document`, {
+            const response = await fetch(`${API}${endpoint}`, {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${token}`
@@ -170,6 +181,11 @@ export default function DocumentSummarizer() {
                                     )}
                                 </div>
                             </div>
+
+                            {summary.important_dates?.length > 0 && <div className="space-y-2">
+                                <h4 className="text-xs uppercase tracking-wider text-gray-500 font-bold">Dates found in the document · verify before relying on them</h4>
+                                <div className="space-y-2">{summary.important_dates.map((item, idx) => <div key={`${item.date}-${idx}`} className="bg-gold/5 border border-gold/10 rounded-lg p-3 text-xs"><span className="text-gold font-semibold">{item.date}</span><p className="text-gray-400 mt-1">{item.context}</p></div>)}</div>
+                            </div>}
                         </div>
                     ) : (
                         <div className="card p-20 text-center border-dashed border-gray-800 text-gray-600 h-full flex flex-col justify-center bg-surface/20 min-h-[400px]">

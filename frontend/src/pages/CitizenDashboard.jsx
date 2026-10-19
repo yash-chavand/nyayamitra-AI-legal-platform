@@ -7,13 +7,17 @@ import SavedDrafts from "../components/SavedDrafts"
 import LegalGuides from "../components/LegalGuides"
 import VoiceAssistant from "../components/VoiceAssistant"
 import BNSHelper from "../components/BNSHelper"
+import LegalHelpFlow from "../components/LegalHelpFlow"
+import DocumentSummarizer from "../components/DocumentSummarizer"
 
 const NAV = [
+    { key: "guide", icon: "🧭", label: "Guided Legal Help" },
     { key: "chat", icon: "💬", label: "Chat Assistant" },
     { key: "voice", icon: "🎙️", label: "Voice Assistant" },
     { key: "bns", icon: "⚖️", label: "BNS Helper" },
     { key: "history", icon: "🕐", label: "Chat History" },
     { key: "documents", icon: "📄", label: "Document Generator" },
+    { key: "understand", icon: "🧾", label: "Understand a PDF" },
     { key: "drafts", icon: "💾", label: "Saved Drafts" },
     { key: "guides", icon: "📚", label: "Legal Guides" },
 ]
@@ -28,6 +32,7 @@ export default function CitizenDashboard() {
 
     const renderContent = () => {
         switch (tab) {
+            case "guide": return <LegalHelpFlow />
             case "chat":
                 return (
                     <div className="flex flex-col items-center justify-center h-full text-center py-20">
@@ -61,6 +66,7 @@ export default function CitizenDashboard() {
             case "bns": return <BNSHelper />
             case "history": return <ChatHistory />
             case "documents": return <DocumentGenerator />
+            case "understand": return <DocumentSummarizer endpoint="/citizen/understand-document" />
             case "drafts": return <SavedDrafts />
             case "guides": return <LegalGuides />
             default: return null

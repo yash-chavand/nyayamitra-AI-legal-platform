@@ -7,6 +7,7 @@ import CasesBrowser from "../components/CasesBrowser"
 import LawyerDocuments from "../components/LawyerDocuments"
 import DocumentSummarizer from "../components/DocumentSummarizer"
 import HearingScheduler from "../components/HearingScheduler"
+import ClientMatters from "../components/ClientMatters"
 
 const NAV = [
     { key: "search", icon: "🔍", label: "Case Similarity" },
@@ -15,6 +16,7 @@ const NAV = [
     { key: "summarizer", icon: "📄", label: "PDF Summarizer" },
     { key: "scheduler", icon: "📅", label: "Hearing Scheduler" },
     { key: "cases", icon: "📁", label: "Case Browser" },
+    { key: "matters", icon: "👥", label: "Clients & Matters" },
 ]
 
 export default function LawyerDashboard() {
@@ -84,6 +86,7 @@ export default function LawyerDashboard() {
                     {tab === "summarizer" && <DocumentSummarizer />}
                     {tab === "scheduler" && <HearingScheduler />}
                     {tab === "cases" && <CasesBrowser />}
+                    {tab === "matters" && <ClientMatters />}
                 </main>
             </div>
         </div>

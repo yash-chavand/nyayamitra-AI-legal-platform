@@ -1,19 +1,40 @@
 import json
 import io
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
 from docx import Document
+from pypdf import PdfReader
 
 from ...db.database import get_db
-from ...db.models import User, Conversation, Draft
+from ...db.models import User, Conversation, Draft, DocumentVersion
 from ...core.auth import get_current_user
 from ...schemas.schemas import QuestionRequest, DocumentRequest
 from ...services.vector_service import vector_service
 from ...services.bns_service import bns_service
 
 router = APIRouter(tags=["Citizen - RAG & Drafting"])
+
+@router.post("/understand-document")
+def understand_document(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Please upload a PDF document")
+    content = file.file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF must be 10 MB or smaller")
+    try:
+        reader = PdfReader(io.BytesIO(content))
+        if len(reader.pages) > 100:
+            raise HTTPException(status_code=413, detail="PDF must have 100 pages or fewer")
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read PDF: {e}")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No readable text found. Scanned PDFs may need OCR before upload.")
+    return vector_service.summarize_legal_document(text)
 
 import re
 
@@ -112,6 +133,11 @@ def get_draft(draft_id: int, current_user: User = Depends(get_current_user), db:
 def delete_draft(draft_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     draft = db.query(Draft).filter(Draft.id == draft_id, Draft.user_id == current_user.id).first()
     if not draft: raise HTTPException(status_code=404, detail="Not found")
+    db.query(DocumentVersion).filter(
+        DocumentVersion.user_id == current_user.id,
+        DocumentVersion.document_type == "citizen_draft",
+        DocumentVersion.document_id == draft_id
+    ).delete(synchronize_session=False)
     db.delete(draft)
     db.commit()
     return {"message": "Deleted"}
@@ -131,8 +157,23 @@ def update_draft(draft_id: int, body: dict, current_user: User = Depends(get_cur
     content = body.get("content")
     if content is None:
         raise HTTPException(status_code=400, detail="Missing content")
+
+    if content != draft.content:
+        db.add(DocumentVersion(user_id=current_user.id, document_type="citizen_draft", document_id=draft.id, content=draft.content))
     
     draft.content = content
     draft.updated_at = datetime.now()
     db.commit()
     return {"message": "Updated successfully", "content": draft.content}
+
+@router.get("/drafts/{draft_id}/versions")
+def get_draft_versions(draft_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    draft = db.query(Draft).filter(Draft.id == draft_id, Draft.user_id == current_user.id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Not found")
+    versions = db.query(DocumentVersion).filter(
+        DocumentVersion.user_id == current_user.id,
+        DocumentVersion.document_type == "citizen_draft",
+        DocumentVersion.document_id == draft_id
+    ).order_by(DocumentVersion.created_at.desc()).limit(20).all()
+    return [{"id": v.id, "content": v.content, "created_at": v.created_at} for v in versions]

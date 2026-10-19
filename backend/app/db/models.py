@@ -81,3 +81,33 @@ class Hearing(Base):
     stage        = Column(String(100), nullable=True) # "Arguments", "Evidence", etc.
     notes        = Column(Text, nullable=True)
     created_at   = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class ClientMatter(Base):
+    """Private lawyer-owned client matter and time-limited intake link."""
+    __tablename__ = "client_matters"
+
+    id                = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id           = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    client_name       = Column(String(255), nullable=False)
+    contact_email     = Column(String(255), nullable=True)
+    matter_title      = Column(String(255), nullable=False)
+    status            = Column(String(40), nullable=False, default="Intake")
+    next_action       = Column(String(255), nullable=True)
+    next_action_date  = Column(String(20), nullable=True)
+    notes             = Column(Text, nullable=True)
+    intake_token      = Column(String(64), unique=True, nullable=False, index=True)
+    intake_expires_at = Column(DateTime(timezone=True), nullable=False)
+    intake_data       = Column(Text, nullable=True)
+    intake_submitted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at        = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class DocumentVersion(Base):
+    """Owner-scoped snapshots created before a saved document is edited."""
+    __tablename__ = "document_versions"
+
+    id            = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id       = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    document_type = Column(String(40), nullable=False, index=True)
+    document_id   = Column(Integer, nullable=False, index=True)
+    content       = Column(Text, nullable=False)
+    created_at    = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

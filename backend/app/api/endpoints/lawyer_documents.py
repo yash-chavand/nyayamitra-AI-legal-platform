@@ -3,7 +3,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from ...db.database import get_db
-from ...db.models import User, LawyerDocument
+from ...db.models import User, LawyerDocument, DocumentVersion
 from ...core.auth import require_lawyer
 from ...services.vector_service import vector_service
 from fpdf import FPDF
@@ -130,7 +130,22 @@ def update_document(doc_id: int, body: dict, current_user: User = Depends(requir
     content = body.get("content")
     if content is None:
         raise HTTPException(status_code=400, detail="Missing content")
+
+    if content != doc.content:
+        db.add(DocumentVersion(user_id=current_user.id, document_type="lawyer_document", document_id=doc.id, content=doc.content))
     
     doc.content = content
     db.commit()
     return {"message": "Updated successfully", "content": doc.content}
+
+@router.get("/{doc_id}/versions")
+def get_document_versions(doc_id: int, current_user: User = Depends(require_lawyer), db: Session = Depends(get_db)):
+    doc = db.query(LawyerDocument).filter(LawyerDocument.id == doc_id, LawyerDocument.user_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    versions = db.query(DocumentVersion).filter(
+        DocumentVersion.user_id == current_user.id,
+        DocumentVersion.document_type == "lawyer_document",
+        DocumentVersion.document_id == doc_id
+    ).order_by(DocumentVersion.created_at.desc()).limit(20).all()
+    return [{"id": v.id, "content": v.content, "created_at": v.created_at} for v in versions]

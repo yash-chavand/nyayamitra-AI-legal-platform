@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react"
-import { apiPost, apiPut, API } from "../utils/auth"
+import { apiPost, apiPut, API, API_CONFIGURATION_ERROR } from "../utils/auth"
 import ReactMarkdown from "react-markdown"
 import RichTextEditor from "./RichTextEditor"
 
@@ -121,6 +121,7 @@ export default function DocumentGenerator() {
 
     const handleDownload = async () => {
         if (!draftId) return
+        if (!API) { alert(API_CONFIGURATION_ERROR); return }
         try {
             const token = localStorage.getItem("legal_token")
             const res = await fetch(`${API}/citizen/download-docx/${draftId}`, {
